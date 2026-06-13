@@ -1,5 +1,7 @@
 import { defineConfig } from 'vite';
 
-export default {
-  base: '/CG-Mag-Project/',
-};
+export default defineConfig({
+  server: {
+    host: '0.0.0.0',
+  },
+});
