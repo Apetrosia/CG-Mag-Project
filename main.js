@@ -80,6 +80,29 @@ void main() {
 	vec3 litColor = baseColor * (ambient + diffuse * 1.2 * uDayFactor + backLight * 0.3);
 	litColor += lightColor * 0.05 * pow(diffuse, 2.0);
 
+	// высота камеры не используется — берём world Y
+	float fogHeight = vWorldPosition.y;
+
+	// нормализуем (подбирается вручную под твою сцену)
+	float fogStart = -5.0;
+	float fogEnd = -30.0;
+
+	// линейная маска высоты
+	float heightFog = smoothstep(fogStart, fogEnd, fogHeight);
+
+	// экспоненциальная плотность (реалистичнее)
+	float fog = 1.0 - exp(-heightFog * 3.2);
+
+	// цвет тумана = небо
+	vec3 fogColor = mix(
+		vec3(0.10, 0.13, 0.19),
+		vec3(0.76, 0.84, 0.93),
+		uDayFactor
+	);
+
+	// смешивание
+	litColor = mix(litColor, fogColor, fog);
+
 	gl_FragColor = vec4(litColor, 1.0);
 }
 `;
@@ -331,14 +354,43 @@ function fbm(x, z) {
 	return value;
 }
 
+function mix(a, b, t)
+{
+	return a * (1.0 - t) + b * t;
+}
+
 function terrainHeight(x, z)
 {
-	const continental = fbm(x * 0.35, z * 0.35) * 60.0;
-	const mountains = Math.pow(fbm(x * 1.2 + 200.0, z * 1.2 - 130.0), 3.2) * 120.0;
-	const ridges = Math.abs(fbm(x * 2.8, z * 2.8) - 0.5) * 40.0;
-	const detail = fbm(x * 8.0, z * 8.0) * 8.0;
+	const continental = fbm(x * 0.32, z * 0.32) * 55.0;
 
-	return (continental + mountains + ridges + detail - 50.0);
+	const biome = fbm(x * 0.05, z * 0.05);
+	const mountainZone = smoothstep(0.35, 0.85, biome);
+
+	let depth = (z + 200.0) / 380.0;
+	depth = Math.max(0.0, Math.min(1.0, depth));
+
+	const frontDepth = 1.0 - depth;
+
+	const frontBoost = 0.7 + 1.3 * frontDepth;
+
+	const fbm1 = Math.max(fbm(x * 1.4, z * 1.4), 0.0);
+	const fbm2 = Math.max(fbm(x * 2.2 + 400.0, z * 2.2 - 400.0), 0.0);
+	const fbm3 = fbm(x * 3.0, z * 3.0);
+
+	const frontNoise = Math.max(fbm(x * 0.03 + 777.0, z * 0.03 - 777.0), 0.0);
+	const backNoiseShape = Math.max(fbm(x * 0.9, z * 0.9 + 1000.0), 0.0);
+	const extremeNoise = Math.max(fbm(x * 0.02 + 3000.0, z * 0.02 - 3000.0), 0.0);
+	const baseMountains = Math.pow(fbm1, 2.2) * mountainZone * 150.0 * frontBoost;
+	const secondaryMountains = Math.pow(fbm2, 2.4) * 80.0 * frontBoost;
+	const ridges = Math.abs(fbm3 - 0.5) * 35.0 * (0.75 + 0.25 * frontDepth);
+	const frontSpikes = Math.pow(smoothstep(0.90, 0.99, frontNoise), 5.0) * 220.0 * frontDepth;
+	const backMass = smoothstep(0.5, 1.0, depth);
+	const backMountains = backMass * Math.pow(backNoiseShape, 2.0) * 120.0;
+	const extremeBackMask = smoothstep(0.9, 0.995, extremeNoise);
+	const extremeBackMountains = Math.pow(extremeBackMask, 3.0) * backMass * 170.0;
+	const height = continental + baseMountains + secondaryMountains + ridges + frontSpikes + backMountains + extremeBackMountains - 55.0;
+
+	return isFinite(height) ? height : 0.0;
 }
 
 function buildTerrain(gridSize, worldSize) {
