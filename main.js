@@ -53,21 +53,13 @@ void main() {
 	vec3 lightDir = normalize(uSunDirection);
 	float diffuse = max(dot(normal, lightDir), 0.0);
 	float backLight = max(dot(normal, normalize(vec3(-0.35, 0.7, 0.45))), 0.0);
-	float slope = 1.0 - saturate(normal.y);
+	float heightBlend = smoothstep(-14.0, 34.0, vHeight);
+	float slopeDarken = 1.0 - saturate(normal.y) * 0.45;
 
-	vec3 rock = vec3(0.18, 0.22, 0.24);
-	vec3 grass = vec3(0.15, 0.28, 0.17);
-	vec3 snow = vec3(0.93, 0.95, 0.98);
-	vec3 dirt = vec3(0.31, 0.24, 0.17);
-
-	float snowMask = smoothstep(18.0, 33.0, vHeight + slope * 10.0);
-	float grassMask = smoothstep(-2.0, 13.0, vHeight) * (1.0 - snowMask);
-	float dirtMask = smoothstep(-12.0, 8.0, vHeight) * (1.0 - grassMask);
-
-	vec3 baseColor = rock;
-	baseColor = mix(baseColor, dirt, dirtMask);
-	baseColor = mix(baseColor, grass, grassMask);
-	baseColor = mix(baseColor, snow, snowMask);
+	vec3 lowColor = vec3(0.14, 0.34, 0.16);
+	vec3 highColor = vec3(0.66, 0.68, 0.7);
+	vec3 baseColor = mix(lowColor, highColor, heightBlend);
+	baseColor = mix(baseColor, vec3(0.2, 0.2, 0.22), slopeDarken * 0.25);
 
 	float ambient = mix(0.35, 0.14, 1.0 - uDayFactor);
 	vec3 lightColor = mix(vec3(1.2, 1.05, 0.95), vec3(0.55, 0.7, 1.0), 1.0 - uDayFactor);
@@ -145,27 +137,10 @@ vec3 skyGradient(float y, float dayFactor) {
 	return mix(bottom, top, smoothstep(0.0, 1.0, y));
 }
 
-float circle(vec2 uv, vec2 center, float radius) {
-	return smoothstep(radius, radius - 0.012, distance(uv, center));
-}
-
 void main() {
 	float dayFactor = smoothstep(0.05, 0.92, uDayFactor);
 	vec2 uv = vUv;
-	vec2 centered = uv * 2.0 - 1.0;
-
 	vec3 color = skyGradient(uv.y, dayFactor);
-
-	float dawnGlow = exp(-pow((uv.y - 0.22) * 5.0, 2.0)) * (1.0 - abs(centered.x) * 0.35);
-	color += mix(vec3(0.2, 0.14, 0.28), vec3(0.95, 0.52, 0.26), dayFactor) * dawnGlow * 0.25;
-
-	vec2 sunCenter = vec2(0.5 + cos(uTime * 0.07) * 0.33, 0.38 + sin(uTime * 0.07) * 0.22);
-	vec2 moonCenter = vec2(0.5 + cos(uTime * 0.07 + 3.14159) * 0.33, 0.38 + sin(uTime * 0.07 + 3.14159) * 0.22);
-	float sun = circle(uv, sunCenter, 0.075);
-	float moon = circle(uv, moonCenter, 0.06) * (1.0 - dayFactor);
-
-	color += vec3(1.0, 0.9, 0.66) * sun * dayFactor * 1.6;
-	color += vec3(0.7, 0.8, 1.0) * moon * 0.7;
 
 	float stars = 0.0;
 	vec2 starUv = uv * vec2(uResolution.x / uResolution.y, 1.0) * 54.0;
@@ -185,10 +160,35 @@ void main() {
 	float horizonMist = smoothstep(0.0, 0.35, 1.0 - uv.y);
 	color = mix(color, mix(vec3(0.1, 0.13, 0.19), vec3(0.76, 0.84, 0.93), dayFactor), horizonMist * 0.42);
 
-	float vignette = smoothstep(1.3, 0.35, length(centered));
-	color *= vignette;
-
 	gl_FragColor = vec4(color, 1.0);
+}
+`;
+
+const spriteVertexSource = `
+attribute vec2 aCorner;
+
+uniform vec2 uCenter;
+uniform vec2 uSize;
+
+varying vec2 vUv;
+
+void main() {
+	vUv = aCorner * 0.5 + 0.5;
+	gl_Position = vec4(uCenter + aCorner * uSize, 0.0, 1.0);
+}
+`;
+
+const spriteFragmentSource = `
+precision mediump float;
+
+uniform sampler2D uTexture;
+uniform vec4 uTint;
+
+varying vec2 vUv;
+
+void main() {
+	vec4 color = texture2D(uTexture, vUv);
+	gl_FragColor = vec4(color.rgb * uTint.rgb, color.a * uTint.a);
 }
 `;
 
@@ -406,6 +406,7 @@ function setUniformVector(location, vector) {
 
 const terrainProgram = createProgram(terrainVertexSource, terrainFragmentSource);
 const skyProgram = createProgram(skyVertexSource, skyFragmentSource);
+const spriteProgram = createProgram(spriteVertexSource, spriteFragmentSource);
 
 const terrainLocations = {
 	position: gl.getAttribLocation(terrainProgram, 'aPosition'),
@@ -426,6 +427,14 @@ const skyLocations = {
 	resolution: gl.getUniformLocation(skyProgram, 'uResolution'),
 };
 
+const spriteLocations = {
+	corner: gl.getAttribLocation(spriteProgram, 'aCorner'),
+	center: gl.getUniformLocation(spriteProgram, 'uCenter'),
+	size: gl.getUniformLocation(spriteProgram, 'uSize'),
+	texture: gl.getUniformLocation(spriteProgram, 'uTexture'),
+	tint: gl.getUniformLocation(spriteProgram, 'uTint'),
+};
+
 const terrain = buildTerrain(220, 180);
 
 const terrainBuffers = {
@@ -441,15 +450,60 @@ const skyBuffer = createBuffer(new Float32Array([
 	 1,  1,
 ]));
 
+const spriteCornersBuffer = skyBuffer;
+
+function createTexture() {
+	const texture = gl.createTexture();
+	gl.bindTexture(gl.TEXTURE_2D, texture);
+	gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 0]));
+	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+	return texture;
+}
+
+function uploadTexture(texture, image) {
+	gl.bindTexture(gl.TEXTURE_2D, texture);
+	gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+	gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+}
+
+function loadTexture(sourceUrl) {
+	const texture = createTexture();
+	const image = new Image();
+	image.decoding = 'async';
+	const state = { texture, image, aspect: 1 };
+	image.onload = () => {
+		state.aspect = image.naturalWidth / image.naturalHeight || 1;
+		uploadTexture(texture, image);
+	};
+	image.src = sourceUrl;
+	return state;
+}
+
+const sunSprite = loadTexture(new URL('./sun.png', import.meta.url).href);
+const moonSprite = loadTexture(new URL('./moon.png', import.meta.url).href);
+
 const keysDown = new Set();
 
 const camera = {
 	position: [0, 34, 92],
-	target: [0, 18, 0],
+	yaw: Math.PI,
+	pitch: -0.17,
 };
 
-function getCameraBasis(position, target) {
-	const forward = normalizeVector(subtractVectors(target, position));
+function getCameraForward() {
+	const cosPitch = Math.cos(camera.pitch);
+	return normalizeVector([
+		Math.sin(camera.yaw) * cosPitch,
+		Math.sin(camera.pitch),
+		Math.cos(camera.yaw) * cosPitch,
+	]);
+}
+
+function getCameraBasis() {
+	const forward = getCameraForward();
 	const worldUp = [0, 1, 0];
 	let right = crossVectors(forward, worldUp);
 	right = normalizeVector(right);
@@ -459,7 +513,7 @@ function getCameraBasis(position, target) {
 }
 
 function moveCamera(deltaTime) {
-	const { forward, right, up } = getCameraBasis(camera.position, camera.target);
+	const { forward, right, up } = getCameraBasis();
 	const baseSpeed = 24.0;
 	const speedMultiplier = keysDown.has('ShiftLeft') || keysDown.has('ShiftRight') ? 2.25 : 1.0;
 	const step = baseSpeed * speedMultiplier * deltaTime;
@@ -506,8 +560,14 @@ function moveCamera(deltaTime) {
 		const normalizer = step / movementLength;
 		const delta = [movement[0] * normalizer, movement[1] * normalizer, movement[2] * normalizer];
 		camera.position = addVectors(camera.position, delta);
-		camera.target = addVectors(camera.target, delta);
 	}
+}
+
+function updateMouseLook(deltaX, deltaY) {
+	const sensitivity = 0.0022;
+	camera.yaw -= deltaX * sensitivity;
+	camera.pitch -= deltaY * sensitivity;
+	camera.pitch = Math.max(-1.45, Math.min(1.45, camera.pitch));
 }
 
 window.addEventListener('keydown', event => {
@@ -527,6 +587,18 @@ window.addEventListener('keyup', event => {
 
 window.addEventListener('blur', () => {
 	keysDown.clear();
+});
+
+canvas.addEventListener('click', () => {
+	if (document.pointerLockElement !== canvas) {
+		canvas.requestPointerLock();
+	}
+});
+
+document.addEventListener('mousemove', event => {
+	if (document.pointerLockElement === canvas) {
+		updateMouseLook(event.movementX, event.movementY);
+	}
 });
 
 function bindAttribute(buffer, location, size) {
@@ -566,6 +638,29 @@ function drawSky(time, dayFactor, width, height) {
 	gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 }
 
+function drawSprite(sprite, center, sizePx, tint) {
+	if (!sprite.image.complete || sprite.image.naturalWidth === 0) {
+		return;
+	}
+
+	gl.useProgram(spriteProgram);
+	gl.disable(gl.DEPTH_TEST);
+	gl.disable(gl.CULL_FACE);
+	gl.enable(gl.BLEND);
+	gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+	bindAttribute(spriteCornersBuffer, spriteLocations.corner, 2);
+	gl.activeTexture(gl.TEXTURE0);
+	gl.bindTexture(gl.TEXTURE_2D, sprite.texture);
+	gl.uniform1i(spriteLocations.texture, 0);
+	gl.uniform2f(spriteLocations.center, center[0], center[1]);
+	gl.uniform2f(spriteLocations.size, sizePx[0] * sprite.aspect, sizePx[1]);
+	gl.uniform4f(spriteLocations.tint, tint[0], tint[1], tint[2], tint[3]);
+
+	gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+	gl.disable(gl.BLEND);
+}
+
 function drawTerrain(projection, view, cameraPosition, sunDirection, dayFactor) {
 	gl.useProgram(terrainProgram);
 	gl.enable(gl.DEPTH_TEST);
@@ -601,24 +696,40 @@ function frame(now) {
 
 	const { width, height } = resizeCanvas();
 	const time = now * 0.001;
-	const cycle = (Math.sin(time * 0.18) + 1) * 0.5;
-	const dayFactor = Math.pow(smoothstep(0.08, 0.9, cycle), 1.2);
-	const lookTarget = camera.target;
+	const cycleAngle = time * 0.18 - Math.PI * 0.5;
+	const cycle = (Math.sin(cycleAngle) + 1) * 0.5;
+	const dayFactor = Math.pow(smoothstep(0.12, 0.88, cycle), 1.15);
+	const forward = getCameraForward();
+	const lookTarget = addVectors(camera.position, forward);
 	const cameraPosition = camera.position;
 	const view = matrixLookAt(cameraPosition, lookTarget, [0, 1, 0]);
 	const projection = matrixPerspective(Math.PI / 3.4, width / height, 0.1, 400.0);
 
-	const sunAzimuth = time * 0.07;
+	const sunAzimuth = cycleAngle;
 	const sunDirection = normalizeVector([
 		Math.cos(sunAzimuth),
-		0.82 + Math.sin(time * 0.11) * 0.06,
+		Math.sin(sunAzimuth) * 0.75 + 0.35,
 		Math.sin(sunAzimuth),
 	]);
+
+	const sunCenter = [
+		0.5 + Math.cos(cycleAngle) * 0.34,
+		0.5 + Math.sin(cycleAngle) * 0.34,
+	];
+	const moonAngle = cycleAngle + Math.PI;
+	const moonCenter = [
+		0.5 + Math.cos(moonAngle) * 0.34,
+		0.5 + Math.sin(moonAngle) * 0.34,
+	];
+	const spriteWidth = 96 / width * 2;
+	const spriteHeight = 96 / height * 2;
 
 	gl.clearColor(0, 0, 0, 1);
 	gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
 	drawSky(time, dayFactor, width, height);
+	drawSprite(sunSprite, [sunCenter[0] * 2 - 1, sunCenter[1] * 2 - 1], [spriteWidth, spriteHeight], [1, 1, 1, dayFactor]);
+	drawSprite(moonSprite, [moonCenter[0] * 2 - 1, moonCenter[1] * 2 - 1], [spriteWidth * 0.84, spriteHeight * 0.84], [1, 1, 1, 1.0 - dayFactor]);
 	drawTerrain(projection, view, cameraPosition, sunDirection, dayFactor);
 
 	requestAnimationFrame(frame);
