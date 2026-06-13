@@ -14,6 +14,7 @@ if (!gl) {
 const terrainVertexSource = `
 attribute vec3 aPosition;
 attribute vec3 aNormal;
+attribute vec2 aUv;
 
 uniform mat4 uProjection;
 uniform mat4 uView;
@@ -22,6 +23,7 @@ uniform mat4 uModel;
 varying vec3 vWorldPosition;
 varying vec3 vNormal;
 varying float vHeight;
+varying vec2 vUv;
 
 void main() {
 	vec4 worldPosition = uModel * vec4(aPosition, 1.0);
@@ -29,6 +31,7 @@ void main() {
 	vNormal = mat3(uModel) * aNormal;
 	vHeight = aPosition.y;
 	gl_Position = uProjection * uView * worldPosition;
+	vUv = aUv;
 }
 `;
 
@@ -39,10 +42,13 @@ uniform vec3 uSunDirection;
 uniform vec3 uCameraPosition;
 uniform float uDayFactor;
 uniform float uFogDensity;
+uniform sampler2D uGrass;
+uniform sampler2D uStone;
 
 varying vec3 vWorldPosition;
 varying vec3 vNormal;
 varying float vHeight;
+varying vec2 vUv;
 
 float saturate(float value) {
 	return clamp(value, 0.0, 1.0);
@@ -56,24 +62,25 @@ void main() {
 	float heightBlend = smoothstep(-14.0, 34.0, vHeight);
 	float slopeDarken = 1.0 - saturate(normal.y) * 0.45;
 
-	vec3 lowColor = vec3(0.14, 0.34, 0.16);
-	vec3 highColor = vec3(0.66, 0.68, 0.7);
-	vec3 baseColor = mix(lowColor, highColor, heightBlend);
-	baseColor = mix(baseColor, vec3(0.2, 0.2, 0.22), slopeDarken * 0.25);
+	float stoneMask = smoothstep(-25.0, 10.0, vHeight);
+	float grassMask = 1.0 - stoneMask;
+
+	vec3 grass = vec3(0.18, 0.42, 0.18);
+	vec3 stone = vec3(0.45, 0.45, 0.48);
+
+	// добавим лёгкую “грязь”, чтобы не было пластика
+	float noise = fract(sin(dot(vWorldPosition.xz, vec2(12.9898, 78.233))) * 43758.5453);
+	grass += (noise - 0.5) * 0.03;
+	stone += (noise - 0.5) * 0.02;
+
+	vec3 baseColor = mix(grass, stone, stoneMask);
 
 	float ambient = mix(0.35, 0.14, 1.0 - uDayFactor);
 	vec3 lightColor = mix(vec3(1.2, 1.05, 0.95), vec3(0.55, 0.7, 1.0), 1.0 - uDayFactor);
 	vec3 litColor = baseColor * (ambient + diffuse * 1.2 * uDayFactor + backLight * 0.3);
 	litColor += lightColor * 0.05 * pow(diffuse, 2.0);
 
-	float heightFog = smoothstep(-8.0, 30.0, vHeight) * 0.35;
-	float distanceFog = 1.0 - exp(-uFogDensity * length(uCameraPosition - vWorldPosition));
-	float fogAmount = saturate(heightFog + distanceFog);
-
-	vec3 dawnFog = vec3(0.54, 0.62, 0.7);
-	vec3 nightFog = vec3(0.04, 0.07, 0.12);
-	vec3 fogColor = mix(nightFog, dawnFog, uDayFactor);
-	gl_FragColor = vec4(mix(litColor, fogColor, fogAmount), 1.0);
+	gl_FragColor = vec4(litColor, 1.0);
 }
 `;
 
@@ -324,13 +331,14 @@ function fbm(x, z) {
 	return value;
 }
 
-function terrainHeight(x, z) {
-	const ridge = Math.abs(fbm(x * 1.15, z * 1.15) - 0.5) * 2.0;
-	const base = fbm(x, z) * 14.0;
-	const mountains = Math.pow(ridge, 2.1) * 30.0;
-	const valleys = (fbm(x * 0.5 + 81.0, z * 0.5 - 42.0) - 0.5) * 9.0;
-	const distanceFalloff = Math.max(0, 1 - Math.hypot(x * 0.015, z * 0.015));
-	return base + mountains * distanceFalloff + valleys;
+function terrainHeight(x, z)
+{
+	const continental = fbm(x * 0.35, z * 0.35) * 60.0;
+	const mountains = Math.pow(fbm(x * 1.2 + 200.0, z * 1.2 - 130.0), 3.2) * 120.0;
+	const ridges = Math.abs(fbm(x * 2.8, z * 2.8) - 0.5) * 40.0;
+	const detail = fbm(x * 8.0, z * 8.0) * 8.0;
+
+	return (continental + mountains + ridges + detail - 50.0);
 }
 
 function buildTerrain(gridSize, worldSize) {
@@ -338,7 +346,9 @@ function buildTerrain(gridSize, worldSize) {
 	const positions = new Float32Array(verticesPerSide * verticesPerSide * 3);
 	const normals = new Float32Array(verticesPerSide * verticesPerSide * 3);
 	const indices = new Uint16Array(gridSize * gridSize * 6);
+	const uvs = new Float32Array(verticesPerSide * verticesPerSide * 2);
 
+	let uvOffset = 0;
 	let positionOffset = 0;
 	const heights = new Float32Array(verticesPerSide * verticesPerSide);
 
@@ -353,6 +363,8 @@ function buildTerrain(gridSize, worldSize) {
 			positions[positionOffset++] = worldX;
 			positions[positionOffset++] = height;
 			positions[positionOffset++] = worldZ;
+			uvs[uvOffset++] = xRatio * 10.0;
+			uvs[uvOffset++] = zRatio * 10.0;
 		}
 	}
 
@@ -411,13 +423,15 @@ const spriteProgram = createProgram(spriteVertexSource, spriteFragmentSource);
 const terrainLocations = {
 	position: gl.getAttribLocation(terrainProgram, 'aPosition'),
 	normal: gl.getAttribLocation(terrainProgram, 'aNormal'),
+	uv: gl.getAttribLocation(terrainProgram, 'aUv'),
 	projection: gl.getUniformLocation(terrainProgram, 'uProjection'),
 	view: gl.getUniformLocation(terrainProgram, 'uView'),
 	model: gl.getUniformLocation(terrainProgram, 'uModel'),
 	sunDirection: gl.getUniformLocation(terrainProgram, 'uSunDirection'),
 	cameraPosition: gl.getUniformLocation(terrainProgram, 'uCameraPosition'),
 	dayFactor: gl.getUniformLocation(terrainProgram, 'uDayFactor'),
-	fogDensity: gl.getUniformLocation(terrainProgram, 'uFogDensity'),
+	grass: gl.getUniformLocation(terrainProgram, 'uGrass'),
+	stone: gl.getUniformLocation(terrainProgram, 'uStone'),
 };
 
 const skyLocations = {
@@ -435,12 +449,13 @@ const spriteLocations = {
 	tint: gl.getUniformLocation(spriteProgram, 'uTint'),
 };
 
-const terrain = buildTerrain(220, 180);
+const terrain = buildTerrain(220, 380);
 
 const terrainBuffers = {
 	position: createBuffer(terrain.positions),
 	normal: createBuffer(terrain.normals),
 	index: createBuffer(terrain.indices, gl.ELEMENT_ARRAY_BUFFER),
+	uv: createBuffer(terrain.uvs),
 };
 
 const skyBuffer = createBuffer(new Float32Array([
@@ -484,13 +499,12 @@ function loadTexture(sourceUrl) {
 
 const sunSprite = loadTexture(new URL('./sun.png', import.meta.url).href);
 const moonSprite = loadTexture(new URL('./moon.png', import.meta.url).href);
-
-const keysDown = new Set();
+const grassTex = loadTexture(new URL('./grass.png', import.meta.url).href);
+const stoneTex = loadTexture(new URL('./stone.jpg', import.meta.url).href);
 
 const camera = {
 	position: [0, 34, 92],
-	yaw: Math.PI,
-	pitch: -0.17,
+	target: [0, 10, 0],
 };
 
 function getCameraForward() {
@@ -501,105 +515,6 @@ function getCameraForward() {
 		Math.cos(camera.yaw) * cosPitch,
 	]);
 }
-
-function getCameraBasis() {
-	const forward = getCameraForward();
-	const worldUp = [0, 1, 0];
-	let right = crossVectors(forward, worldUp);
-	right = normalizeVector(right);
-	const up = normalizeVector(crossVectors(right, forward));
-
-	return { forward, right, up };
-}
-
-function moveCamera(deltaTime) {
-	const { forward, right, up } = getCameraBasis();
-	const baseSpeed = 24.0;
-	const speedMultiplier = keysDown.has('ShiftLeft') || keysDown.has('ShiftRight') ? 2.25 : 1.0;
-	const step = baseSpeed * speedMultiplier * deltaTime;
-	const movement = [0, 0, 0];
-
-	if (keysDown.has('KeyW')) {
-		movement[0] += forward[0];
-		movement[1] += forward[1];
-		movement[2] += forward[2];
-	}
-
-	if (keysDown.has('KeyS')) {
-		movement[0] -= forward[0];
-		movement[1] -= forward[1];
-		movement[2] -= forward[2];
-	}
-
-	if (keysDown.has('KeyA')) {
-		movement[0] -= right[0];
-		movement[1] -= right[1];
-		movement[2] -= right[2];
-	}
-
-	if (keysDown.has('KeyD')) {
-		movement[0] += right[0];
-		movement[1] += right[1];
-		movement[2] += right[2];
-	}
-
-	if (keysDown.has('Space')) {
-		movement[0] += up[0];
-		movement[1] += up[1];
-		movement[2] += up[2];
-	}
-
-	if (keysDown.has('ControlLeft') || keysDown.has('ControlRight')) {
-		movement[0] -= up[0];
-		movement[1] -= up[1];
-		movement[2] -= up[2];
-	}
-
-	const movementLength = Math.hypot(movement[0], movement[1], movement[2]);
-	if (movementLength > 0) {
-		const normalizer = step / movementLength;
-		const delta = [movement[0] * normalizer, movement[1] * normalizer, movement[2] * normalizer];
-		camera.position = addVectors(camera.position, delta);
-	}
-}
-
-function updateMouseLook(deltaX, deltaY) {
-	const sensitivity = 0.0022;
-	camera.yaw -= deltaX * sensitivity;
-	camera.pitch -= deltaY * sensitivity;
-	camera.pitch = Math.max(-1.45, Math.min(1.45, camera.pitch));
-}
-
-window.addEventListener('keydown', event => {
-	if (
-		event.code === 'Space' ||
-		event.code === 'ControlLeft' ||
-		event.code === 'ControlRight'
-	) {
-		event.preventDefault();
-	}
-	keysDown.add(event.code);
-});
-
-window.addEventListener('keyup', event => {
-	keysDown.delete(event.code);
-});
-
-window.addEventListener('blur', () => {
-	keysDown.clear();
-});
-
-canvas.addEventListener('click', () => {
-	if (document.pointerLockElement !== canvas) {
-		canvas.requestPointerLock();
-	}
-});
-
-document.addEventListener('mousemove', event => {
-	if (document.pointerLockElement === canvas) {
-		updateMouseLook(event.movementX, event.movementY);
-	}
-});
 
 function bindAttribute(buffer, location, size) {
 	if (location < 0) {
@@ -669,6 +584,7 @@ function drawTerrain(projection, view, cameraPosition, sunDirection, dayFactor) 
 
 	bindAttribute(terrainBuffers.position, terrainLocations.position, 3);
 	bindAttribute(terrainBuffers.normal, terrainLocations.normal, 3);
+	bindAttribute(terrainBuffers.uv, terrainLocations.uv, 2);
 	gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, terrainBuffers.index);
 
 	setUniformMatrix(terrainLocations.projection, projection);
@@ -677,7 +593,14 @@ function drawTerrain(projection, view, cameraPosition, sunDirection, dayFactor) 
 	setUniformVector(terrainLocations.sunDirection, sunDirection);
 	setUniformVector(terrainLocations.cameraPosition, cameraPosition);
 	gl.uniform1f(terrainLocations.dayFactor, dayFactor);
-	gl.uniform1f(terrainLocations.fogDensity, 0.028);
+
+	gl.activeTexture(gl.TEXTURE0);
+	gl.bindTexture(gl.TEXTURE_2D, grassTex.texture);
+	gl.uniform1i(terrainLocations.grass, 0);
+
+	gl.activeTexture(gl.TEXTURE1);
+	gl.bindTexture(gl.TEXTURE_2D, stoneTex.texture);
+	gl.uniform1i(terrainLocations.stone, 1);
 
 	gl.drawElements(gl.TRIANGLES, terrain.indices.length, gl.UNSIGNED_SHORT, 0);
 }
@@ -692,17 +615,14 @@ function smoothstep(edge0, edge1, value) {
 function frame(now) {
 	const deltaTime = Math.min((now - lastFrame) * 0.001, 0.05);
 	lastFrame = now;
-	moveCamera(deltaTime);
 
 	const { width, height } = resizeCanvas();
 	const time = now * 0.001;
 	const cycleAngle = time * 0.18 - Math.PI * 0.5;
 	const cycle = (Math.sin(cycleAngle) + 1) * 0.5;
 	const dayFactor = Math.pow(smoothstep(0.12, 0.88, cycle), 1.15);
-	const forward = getCameraForward();
-	const lookTarget = addVectors(camera.position, forward);
 	const cameraPosition = camera.position;
-	const view = matrixLookAt(cameraPosition, lookTarget, [0, 1, 0]);
+	const view = matrixLookAt(cameraPosition, camera.target, [0, 1, 0]);
 	const projection = matrixPerspective(Math.PI / 3.4, width / height, 0.1, 400.0);
 
 	const sunAzimuth = cycleAngle;
