@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Atmospheric Observatory</title>
+    <meta
+      name="description"
+      content="WebGL-проект: горы, процедурное небо, туман и смена дня и ночи."
+    />
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <canvas id="scene"></canvas>
+      <section class="hud">
+        <div class="eyebrow">Компьютерная графика</div>
+        <h1>Atmospheric Observatory</h1>
+        <p>Процедурное небо, горы, высотный туман и плавный цикл дня и ночи в чистом WebGL.</p>
+        <div class="chips">
+          <span>Skybox</span>
+          <span>Fog</span>
+          <span>Day / Night</span>
+          <span>Shader-only lighting</span>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="/main.js"></script>
+  </body>
+</html>
