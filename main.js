@@ -170,7 +170,11 @@ vec3 skyGradient(float y, float dayFactor) {
 void main() {
 	float dayFactor = smoothstep(0.05, 0.92, uDayFactor);
 	vec2 uv = vUv;
-	vec3 color = skyGradient(uv.y, dayFactor);
+	float y = uv.y;
+
+	float centeredY = (y - 0.5) * 2.0;
+	centeredY = clamp(centeredY, 0.0, 1.0);
+	vec3 color = skyGradient(centeredY, dayFactor);
 
 	float stars = 0.0;
 	vec2 starUv = uv * vec2(uResolution.x / uResolution.y, 1.0) * 54.0;
