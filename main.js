@@ -408,7 +408,7 @@ function buildTerrain(gridSize, worldSize) {
 		const zRatio = z / gridSize;
 		for (let x = 0; x < verticesPerSide; x++) {
 			const xRatio = x / gridSize;
-			const worldX = (xRatio - 0.5) * worldSize;
+			const worldX = (xRatio - 0.5) * worldSize + 30;
 			const worldZ = (zRatio - 0.5) * worldSize;
 			const height = terrainHeight(worldX, worldZ);
 			heights[z * verticesPerSide + x] = height;
@@ -501,7 +501,7 @@ const spriteLocations = {
 	tint: gl.getUniformLocation(spriteProgram, 'uTint'),
 };
 
-const terrain = buildTerrain(220, 380);
+const terrain = buildTerrain(120, 380);
 
 const terrainBuffers = {
 	position: createBuffer(terrain.positions),
