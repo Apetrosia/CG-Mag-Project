@@ -331,36 +331,28 @@ function mix(a, b, t)
 
 function terrainHeight(x, z)
 {
-	const continental = fbm(x * 0.32, z * 0.32) * 55.0;
+    const continents =
+        fbm(x * 0.25, z * 0.25) * 40.0;
 
-	const biome = fbm(x * 0.05, z * 0.05);
-	const mountainZone = smoothstep(0.35, 0.85, biome);
+    const mountains =
+        Math.pow(
+            fbm(x * 1.2, z * 1.2),
+            3.5
+        ) * 280.0;
 
-	let depth = (z + 200.0) / 380.0;
-	depth = Math.max(0.0, Math.min(1.0, depth));
+    const ridges =
+        Math.abs(
+            fbm(x * 2.5, z * 2.5) - 0.5
+        ) * 60.0;
 
-	const frontDepth = 1.0 - depth;
+    const details =
+        fbm(x * 6.0, z * 6.0) * 12.0;
 
-	const frontBoost = 0.7 + 1.3 * frontDepth;
-
-	const fbm1 = Math.max(fbm(x * 1.4, z * 1.4), 0.0);
-	const fbm2 = Math.max(fbm(x * 2.2 + 400.0, z * 2.2 - 400.0), 0.0);
-	const fbm3 = fbm(x * 3.0, z * 3.0);
-
-	const frontNoise = Math.max(fbm(x * 0.03 + 777.0, z * 0.03 - 777.0), 0.0);
-	const backNoiseShape = Math.max(fbm(x * 0.9, z * 0.9 + 1000.0), 0.0);
-	const extremeNoise = Math.max(fbm(x * 0.02 + 3000.0, z * 0.02 - 3000.0), 0.0);
-	const baseMountains = Math.pow(fbm1, 2.2) * mountainZone * 150.0 * frontBoost;
-	const secondaryMountains = Math.pow(fbm2, 2.4) * 80.0 * frontBoost;
-	const ridges = Math.abs(fbm3 - 0.5) * 35.0 * (0.75 + 0.25 * frontDepth);
-	const frontSpikes = Math.pow(smoothstep(0.90, 0.99, frontNoise), 5.0) * 220.0 * frontDepth;
-	const backMass = smoothstep(0.5, 1.0, depth);
-	const backMountains = backMass * Math.pow(backNoiseShape, 2.0) * 120.0;
-	const extremeBackMask = smoothstep(0.9, 0.995, extremeNoise);
-	const extremeBackMountains = Math.pow(extremeBackMask, 3.0) * backMass * 170.0;
-	const height = continental + baseMountains + secondaryMountains + ridges + frontSpikes + backMountains + extremeBackMountains - 55.0;
-
-	return isFinite(height) ? height : 0.0;
+    return continents
+        + mountains
+        + ridges
+        + details
+        - 70.0;
 }
 
 function buildTerrain(gridSize, worldSize) {
@@ -576,7 +568,7 @@ const grassTex = loadTexture(new URL('./grass.png', import.meta.url).href);
 const stoneTex = loadTexture(new URL('./stone.jpg', import.meta.url).href);
 
 const camera = {
-    position: [0, 34, 92],
+    position: [30, 50, -120],
     yaw: 0,
     pitch: 0,
 };
@@ -704,25 +696,22 @@ function removeRotationFromMatrix(viewMatrix) {
 function drawSkybox(projection, view, dayFactor) {
     gl.useProgram(skyboxProgram);
 
-    // ❗ ВАЖНО: skybox НЕ должен использовать depth buffer
-    gl.depthMask(false);       // не пишем в depth
-    gl.disable(gl.DEPTH_TEST); // не тестируем depth
+    gl.depthMask(false);
+    gl.disable(gl.DEPTH_TEST);
 
     gl.disable(gl.CULL_FACE);
 
     bindAttribute(skyboxBuffers.position, skyboxLocations.position, 3);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, skyboxBuffers.index);
 
-    setUniformMatrix(skyboxLocations.projection, projection);
-
     const skyView = removeRotationFromMatrix(view);
-    setUniformMatrix(skyboxLocations.view, skyView);
 
+    setUniformMatrix(skyboxLocations.projection, projection);
+    setUniformMatrix(skyboxLocations.view, skyView);
     gl.uniform1f(skyboxLocations.dayFactor, dayFactor);
 
     gl.drawElements(gl.TRIANGLES, 36, gl.UNSIGNED_SHORT, 0);
 
-    // ❗ возвращаем обратно состояние (очень важно)
     gl.depthMask(true);
     gl.enable(gl.DEPTH_TEST);
 }
@@ -731,7 +720,7 @@ function drawSprite(sprite, center, sizePx, tint) {
 	if (!sprite.image.complete || sprite.image.naturalWidth === 0) {
 		return;
 	}
-
+	gl.depthMask(false);
 	gl.useProgram(spriteProgram);
 	gl.enable(gl.DEPTH_TEST);
 	gl.disable(gl.CULL_FACE);
@@ -748,12 +737,13 @@ function drawSprite(sprite, center, sizePx, tint) {
 
 	gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 	gl.disable(gl.BLEND);
+	gl.depthMask(true);
 }
 
 function drawTerrain(projection, view, cameraPosition, sunDirection, dayFactor) {
 	gl.useProgram(terrainProgram);
 	gl.depthFunc(gl.LEQUAL);
-	gl.disable(gl.DEPTH_TEST);
+	gl.enable(gl.DEPTH_TEST);
 	gl.enable(gl.CULL_FACE);
 	gl.cullFace(gl.BACK);
 
@@ -787,6 +777,34 @@ function smoothstep(edge0, edge1, value) {
 	return t * t * (3 - 2 * t);
 }
 
+function multiplyMatrixVector(m, v)
+{
+    return [
+        m[0]*v[0] + m[4]*v[1] + m[8]*v[2] + m[12]*v[3],
+        m[1]*v[0] + m[5]*v[1] + m[9]*v[2] + m[13]*v[3],
+        m[2]*v[0] + m[6]*v[1] + m[10]*v[2] + m[14]*v[3],
+        m[3]*v[0] + m[7]*v[1] + m[11]*v[2] + m[15]*v[3]
+    ];
+}
+
+function project(worldPos, projection, view)
+{
+    let p = multiplyMatrixVector(
+        view,
+        [worldPos[0], worldPos[1], worldPos[2], 1]
+    );
+
+    p = multiplyMatrixVector(projection, p);
+
+    if (p[3] <= 0)
+        return null;
+
+    return [
+        p[0] / p[3],
+        p[1] / p[3]
+    ];
+}
+
 function frame(now) {
 	const deltaTime = Math.min((now - lastFrame) * 0.001, 0.05);
 	lastFrame = now;
@@ -795,6 +813,17 @@ function frame(now) {
 	const { width, height } = resizeCanvas();
 	const time = now * 0.001;
 	const cycleAngle = time * 0.18 - Math.PI * 0.5;
+	const skyboxSize = 500;
+	const sunWorld = [
+		Math.cos(cycleAngle) * 300,
+		Math.sin(cycleAngle) * 220,
+		skyboxSize + 2
+	];
+	const moonWorld = [
+		Math.cos(cycleAngle + Math.PI) * 300,
+		Math.sin(cycleAngle + Math.PI) * 220,
+		skyboxSize + 2
+	];
 	const cycle = (Math.sin(cycleAngle) + 1) * 0.5;
 	const dayFactor = Math.pow(smoothstep(0.12, 0.88, cycle), 1.15);
 	const cameraPosition = camera.position;
@@ -803,6 +832,20 @@ function frame(now) {
 	const view = matrixLookAt(cameraPosition, target, [0, 1, 0]);
 	const projection = matrixPerspective(Math.PI / 3.4, width / height, 0.1, 400.0);
 
+	const sunScreen =
+		project(
+			sunWorld,
+			projection,
+			view
+		);
+
+	const moonScreen =
+		project(
+			moonWorld,
+			projection,
+			view
+		);
+
 	const sunAzimuth = cycleAngle;
 	const sunDirection = normalizeVector([
 		Math.cos(sunAzimuth),
@@ -810,15 +853,6 @@ function frame(now) {
 		Math.sin(sunAzimuth),
 	]);
 
-	const sunCenter = [
-		0.5 + Math.cos(cycleAngle) * 0.34,
-		0.5 + Math.sin(cycleAngle) * 0.34,
-	];
-	const moonAngle = cycleAngle + Math.PI;
-	const moonCenter = [
-		0.5 + Math.cos(moonAngle) * 0.34,
-		0.5 + Math.sin(moonAngle) * 0.34,
-	];
 	const spriteWidth = 96 / width * 2;
 	const spriteHeight = 96 / height * 2;
 
@@ -830,10 +864,29 @@ function frame(now) {
 		view,
 		dayFactor
 	);
-	drawSprite(sunSprite, [sunCenter[0] * 2 - 1, sunCenter[1] * 2 - 1], [spriteWidth, spriteHeight], [1, 1, 1, dayFactor]);
-	drawSprite(moonSprite, [moonCenter[0] * 2 - 1, moonCenter[1] * 2 - 1], [spriteWidth * 0.84, spriteHeight * 0.84], [1, 1, 1, 1.0 - dayFactor]);
+	gl.disable(gl.DEPTH_TEST);
+	if (sunScreen)
+	{
+		drawSprite(
+			sunSprite,
+			sunScreen,
+			[spriteWidth, spriteHeight],
+			[1,1,1,dayFactor]
+		);
+	}
+	if (moonScreen)
+	{
+		drawSprite(
+			moonSprite,
+			moonScreen,
+			[spriteWidth * 0.84,
+			spriteHeight * 0.84],
+			[1,1,1,1.0 - dayFactor]
+		);
+	}
+	
+	gl.enable(gl.DEPTH_TEST);
 	drawTerrain(projection, view, cameraPosition, sunDirection, dayFactor);
-
 	requestAnimationFrame(frame);
 }
 
