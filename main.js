@@ -559,9 +559,86 @@ const grassTex = loadTexture(new URL('./grass.png', import.meta.url).href);
 const stoneTex = loadTexture(new URL('./stone.jpg', import.meta.url).href);
 
 const camera = {
-	position: [0, 34, 92],
-	target: [0, 10, 0],
+    position: [0, 34, 92],
+    yaw: 0,
+    pitch: 0,
 };
+
+const keys = {};
+
+window.addEventListener("keydown", e => {
+    keys[e.code] = true;
+});
+
+window.addEventListener("keyup", e => {
+    keys[e.code] = false;
+});
+
+function updateCamera(dt)
+{
+    let speed = 25;
+
+    if (keys["ShiftLeft"])
+        speed *= 3;
+
+    const forward = getCameraForward();
+
+    const right = normalizeVector([
+        forward[2],
+        0,
+        -forward[0]
+    ]);
+
+    if (keys["KeyW"])
+        camera.position = addVectors(
+            camera.position,
+            forward.map(v => v * speed * dt)
+        );
+
+    if (keys["KeyS"])
+        camera.position = addVectors(
+            camera.position,
+            forward.map(v => -v * speed * dt)
+        );
+
+    if (keys["KeyA"])
+        camera.position = addVectors(
+            camera.position,
+            right.map(v => -v * speed * dt)
+        );
+
+    if (keys["KeyD"])
+        camera.position = addVectors(
+            camera.position,
+            right.map(v => v * speed * dt)
+        );
+
+    if (keys["Space"])
+        camera.position[1] += speed * dt;
+
+    if (keys["ControlLeft"])
+        camera.position[1] -= speed * dt;
+}
+
+canvas.addEventListener("click", () => {
+    canvas.requestPointerLock();
+});
+
+document.addEventListener("mousemove", e => {
+
+    if (document.pointerLockElement !== canvas)
+        return;
+
+    camera.yaw -= e.movementX * 0.002;
+    camera.pitch -= e.movementY * 0.002;
+
+    const limit = Math.PI * 0.49;
+
+    camera.pitch = Math.max(
+        -limit,
+        Math.min(limit, camera.pitch)
+    );
+});
 
 function getCameraForward() {
 	const cosPitch = Math.cos(camera.pitch);
@@ -671,6 +748,7 @@ function smoothstep(edge0, edge1, value) {
 function frame(now) {
 	const deltaTime = Math.min((now - lastFrame) * 0.001, 0.05);
 	lastFrame = now;
+	updateCamera(deltaTime);
 
 	const { width, height } = resizeCanvas();
 	const time = now * 0.001;
@@ -678,7 +756,9 @@ function frame(now) {
 	const cycle = (Math.sin(cycleAngle) + 1) * 0.5;
 	const dayFactor = Math.pow(smoothstep(0.12, 0.88, cycle), 1.15);
 	const cameraPosition = camera.position;
-	const view = matrixLookAt(cameraPosition, camera.target, [0, 1, 0]);
+	const forward = getCameraForward();
+	const target = addVectors(cameraPosition, forward);
+	const view = matrixLookAt(cameraPosition, target, [0, 1, 0]);
 	const projection = matrixPerspective(Math.PI / 3.4, width / height, 0.1, 400.0);
 
 	const sunAzimuth = cycleAngle;
