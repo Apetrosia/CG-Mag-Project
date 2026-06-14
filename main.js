@@ -107,94 +107,60 @@ void main() {
 }
 `;
 
-const skyVertexSource = `
-attribute vec2 aPosition;
+const skyboxVertexSource = `
+attribute vec3 aPosition;
 
-varying vec2 vUv;
+uniform mat4 uProjection;
+uniform mat4 uView;
 
-void main() {
-	vUv = aPosition * 0.5 + 0.5;
-	gl_Position = vec4(aPosition, 0.0, 1.0);
+varying vec3 vDirection;
+
+void main()
+{
+   vDirection = aPosition;
+	vec4 pos = uProjection * uView * vec4(aPosition, 1.0);
+	gl_Position = pos.xyww;
 }
 `;
 
-const skyFragmentSource = `
+const skyboxFragmentSource = `
 precision mediump float;
 
-uniform float uTime;
 uniform float uDayFactor;
-uniform vec2 uResolution;
 
-varying vec2 vUv;
+varying vec3 vDirection;
 
-float hash(vec2 p) {
-	p = fract(p * vec2(123.34, 456.21));
-	p += dot(p, p + 45.32);
-	return fract(p.x * p.y);
-}
+void main()
+{
+    vec3 dir = normalize(vDirection);
+	vec3 absDir = abs(dir);
 
-float noise(vec2 p) {
-	vec2 i = floor(p);
-	vec2 f = fract(p);
-	vec2 u = f * f * (3.0 - 2.0 * f);
+	bool isTop = dir.y > 0.8;
+	bool isBottom = dir.y < -0.8;
+	bool isSide = !isTop && !isBottom;
 
-	float a = hash(i + vec2(0.0, 0.0));
-	float b = hash(i + vec2(1.0, 0.0));
-	float c = hash(i + vec2(0.0, 1.0));
-	float d = hash(i + vec2(1.0, 1.0));
+    vec3 dayTop = vec3(0.38, 0.63, 0.94);
+    vec3 dayBottom = vec3(0.82, 0.91, 1.0);
 
-	return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
-}
+    vec3 nightTop = vec3(0.03, 0.05, 0.11);
+    vec3 nightBottom = vec3(0.08, 0.10, 0.18);
 
-float fbm(vec2 p) {
-	float value = 0.0;
-	float amplitude = 0.5;
-	for (int i = 0; i < 5; i++) {
-		value += amplitude * noise(p);
-		p *= 2.0;
-		amplitude *= 0.5;
+    vec3 top = mix(nightTop, dayTop, uDayFactor);
+    vec3 bottom = mix(nightBottom, dayBottom, uDayFactor);
+
+    vec3 color;
+	if (isTop) {
+		color = top;
 	}
-	return value;
-}
+	else if (isBottom) {
+		color = bottom;
+	}
+	else {
+		float gradient = smoothstep(-1.0, 1.0, dir.y);
+		color = mix(bottom, top, gradient);
+	}
 
-vec3 skyGradient(float y, float dayFactor) {
-	vec3 dayTop = vec3(0.38, 0.63, 0.94);
-	vec3 dayBottom = vec3(0.82, 0.91, 1.0);
-	vec3 nightTop = vec3(0.03, 0.05, 0.11);
-	vec3 nightBottom = vec3(0.08, 0.1, 0.18);
-	vec3 top = mix(nightTop, dayTop, dayFactor);
-	vec3 bottom = mix(nightBottom, dayBottom, dayFactor);
-	return mix(bottom, top, smoothstep(0.0, 1.0, y));
-}
-
-void main() {
-	float dayFactor = smoothstep(0.05, 0.92, uDayFactor);
-	vec2 uv = vUv;
-	float y = uv.y;
-
-	float centeredY = (y - 0.5) * 2.0;
-	centeredY = clamp(centeredY, 0.0, 1.0);
-	vec3 color = skyGradient(centeredY, dayFactor);
-
-	float stars = 0.0;
-	vec2 starUv = uv * vec2(uResolution.x / uResolution.y, 1.0) * 54.0;
-	vec2 starCell = floor(starUv);
-	vec2 starFrac = fract(starUv);
-	float starHash = hash(starCell);
-	float starMask = step(0.992, starHash) * smoothstep(0.08, 0.0, length(starFrac - 0.5));
-	stars += starMask;
-	stars += step(0.9975, hash(starCell + 13.37)) * smoothstep(0.045, 0.0, length(starFrac - vec2(0.62, 0.38)));
-	color += vec3(1.0) * stars * (1.0 - dayFactor) * 1.5;
-
-	float clouds = fbm(uv * vec2(5.5, 2.8) + vec2(uTime * 0.01, 0.0));
-	float cloudBand = smoothstep(0.34, 0.72, clouds) * smoothstep(0.12, 0.9, uv.y);
-	vec3 cloudTint = mix(vec3(0.4, 0.5, 0.65), vec3(1.0), dayFactor);
-	color += cloudTint * cloudBand * 0.08;
-
-	float horizonMist = smoothstep(0.0, 0.35, 1.0 - uv.y);
-	color = mix(color, mix(vec3(0.1, 0.13, 0.19), vec3(0.76, 0.84, 0.93), dayFactor), horizonMist * 0.42);
-
-	gl_FragColor = vec4(color, 1.0);
+    gl_FragColor = vec4(color, 1.0);
 }
 `;
 
@@ -473,7 +439,7 @@ function setUniformVector(location, vector) {
 }
 
 const terrainProgram = createProgram(terrainVertexSource, terrainFragmentSource);
-const skyProgram = createProgram(skyVertexSource, skyFragmentSource);
+const skyboxProgram = createProgram(skyboxVertexSource, skyboxFragmentSource);
 const spriteProgram = createProgram(spriteVertexSource, spriteFragmentSource);
 
 const terrainLocations = {
@@ -490,11 +456,31 @@ const terrainLocations = {
 	stone: gl.getUniformLocation(terrainProgram, 'uStone'),
 };
 
-const skyLocations = {
-	position: gl.getAttribLocation(skyProgram, 'aPosition'),
-	time: gl.getUniformLocation(skyProgram, 'uTime'),
-	dayFactor: gl.getUniformLocation(skyProgram, 'uDayFactor'),
-	resolution: gl.getUniformLocation(skyProgram, 'uResolution'),
+
+const skyboxLocations = {
+    position:
+        gl.getAttribLocation(
+            skyboxProgram,
+            'aPosition'
+        ),
+
+    projection:
+        gl.getUniformLocation(
+            skyboxProgram,
+            'uProjection'
+        ),
+
+    view:
+        gl.getUniformLocation(
+            skyboxProgram,
+            'uView'
+        ),
+
+    dayFactor:
+        gl.getUniformLocation(
+            skyboxProgram,
+            'uDayFactor'
+        ),
 };
 
 const spriteLocations = {
@@ -520,6 +506,37 @@ const skyBuffer = createBuffer(new Float32Array([
 	-1,  1,
 	 1,  1,
 ]));
+
+const skyboxVertices = new Float32Array([
+    -1,-1,-1,
+     1,-1,-1,
+     1, 1,-1,
+    -1, 1,-1,
+
+    -1,-1, 1,
+     1,-1, 1,
+     1, 1, 1,
+    -1, 1, 1,
+].map(v => v * 500.0));
+
+const skyboxIndices = new Uint16Array([
+    0,1,2, 0,2,3,
+    4,6,5, 4,7,6,
+
+    4,5,1, 4,1,0,
+    3,2,6, 3,6,7,
+
+    1,5,6, 1,6,2,
+    4,0,3, 4,3,7
+]);
+
+const skyboxBuffers = {
+    position: createBuffer(skyboxVertices),
+    index: createBuffer(
+        skyboxIndices,
+        gl.ELEMENT_ARRAY_BUFFER
+    )
+};
 
 const spriteCornersBuffer = skyBuffer;
 
@@ -604,13 +621,13 @@ function updateCamera(dt)
     if (keys["KeyA"])
         camera.position = addVectors(
             camera.position,
-            right.map(v => -v * speed * dt)
+            right.map(v => v * speed * dt)
         );
 
     if (keys["KeyD"])
         camera.position = addVectors(
             camera.position,
-            right.map(v => v * speed * dt)
+            right.map(v => -v * speed * dt)
         );
 
     if (keys["Space"])
@@ -673,17 +690,41 @@ function resizeCanvas() {
 	return { width: canvas.width, height: canvas.height };
 }
 
-function drawSky(time, dayFactor, width, height) {
-	gl.useProgram(skyProgram);
-	gl.disable(gl.DEPTH_TEST);
-	gl.disable(gl.CULL_FACE);
+function removeTranslationFromMatrix(viewMatrix) {
+    const m = viewMatrix.slice();
+    
+    // обнуляем позиционный компонент (последняя колонка)
+    m[12] = 0;
+    m[13] = 0;
+    m[14] = 0;
 
-	bindAttribute(skyBuffer, skyLocations.position, 2);
-	gl.uniform1f(skyLocations.time, time);
-	gl.uniform1f(skyLocations.dayFactor, dayFactor);
-	gl.uniform2f(skyLocations.resolution, width, height);
+    return m;
+}
 
-	gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+function drawSkybox(projection, view, dayFactor) {
+    gl.useProgram(skyboxProgram);
+
+    // ❗ ВАЖНО: skybox НЕ должен использовать depth buffer
+    gl.depthMask(false);       // не пишем в depth
+    gl.disable(gl.DEPTH_TEST); // не тестируем depth
+
+    gl.disable(gl.CULL_FACE);
+
+    bindAttribute(skyboxBuffers.position, skyboxLocations.position, 3);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, skyboxBuffers.index);
+
+    setUniformMatrix(skyboxLocations.projection, projection);
+
+    const skyView = removeTranslationFromMatrix(view);
+    setUniformMatrix(skyboxLocations.view, skyView);
+
+    gl.uniform1f(skyboxLocations.dayFactor, dayFactor);
+
+    gl.drawElements(gl.TRIANGLES, 36, gl.UNSIGNED_SHORT, 0);
+
+    // ❗ возвращаем обратно состояние (очень важно)
+    gl.depthMask(true);
+    gl.enable(gl.DEPTH_TEST);
 }
 
 function drawSprite(sprite, center, sizePx, tint) {
@@ -692,7 +733,7 @@ function drawSprite(sprite, center, sizePx, tint) {
 	}
 
 	gl.useProgram(spriteProgram);
-	gl.disable(gl.DEPTH_TEST);
+	gl.enable(gl.DEPTH_TEST);
 	gl.disable(gl.CULL_FACE);
 	gl.enable(gl.BLEND);
 	gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
@@ -711,7 +752,8 @@ function drawSprite(sprite, center, sizePx, tint) {
 
 function drawTerrain(projection, view, cameraPosition, sunDirection, dayFactor) {
 	gl.useProgram(terrainProgram);
-	gl.enable(gl.DEPTH_TEST);
+	gl.depthFunc(gl.LEQUAL);
+	gl.disable(gl.DEPTH_TEST);
 	gl.enable(gl.CULL_FACE);
 	gl.cullFace(gl.BACK);
 
@@ -783,7 +825,11 @@ function frame(now) {
 	gl.clearColor(0, 0, 0, 1);
 	gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-	drawSky(time, dayFactor, width, height);
+	drawSkybox(
+		projection,
+		view,
+		dayFactor
+	);
 	drawSprite(sunSprite, [sunCenter[0] * 2 - 1, sunCenter[1] * 2 - 1], [spriteWidth, spriteHeight], [1, 1, 1, dayFactor]);
 	drawSprite(moonSprite, [moonCenter[0] * 2 - 1, moonCenter[1] * 2 - 1], [spriteWidth * 0.84, spriteHeight * 0.84], [1, 1, 1, 1.0 - dayFactor]);
 	drawTerrain(projection, view, cameraPosition, sunDirection, dayFactor);
