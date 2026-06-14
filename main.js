@@ -690,13 +690,13 @@ function resizeCanvas() {
 	return { width: canvas.width, height: canvas.height };
 }
 
-function removeTranslationFromMatrix(viewMatrix) {
+function removeRotationFromMatrix(viewMatrix) {
     const m = viewMatrix.slice();
-    
-    // обнуляем позиционный компонент (последняя колонка)
-    m[12] = 0;
-    m[13] = 0;
-    m[14] = 0;
+
+    // обнуляем rotation (3x3 матрицу слева сверху)
+    m[0] = 1; m[1] = 0; m[2] = 0;
+    m[4] = 0; m[5] = 1; m[6] = 0;
+    m[8] = 0; m[9] = 0; m[10] = 1;
 
     return m;
 }
@@ -715,7 +715,7 @@ function drawSkybox(projection, view, dayFactor) {
 
     setUniformMatrix(skyboxLocations.projection, projection);
 
-    const skyView = removeTranslationFromMatrix(view);
+    const skyView = removeRotationFromMatrix(view);
     setUniformMatrix(skyboxLocations.view, skyView);
 
     gl.uniform1f(skyboxLocations.dayFactor, dayFactor);
