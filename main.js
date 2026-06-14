@@ -864,7 +864,6 @@ function frame(now) {
 		view,
 		dayFactor
 	);
-	gl.disable(gl.DEPTH_TEST);
 	if (sunScreen)
 	{
 		drawSprite(
@@ -885,7 +884,6 @@ function frame(now) {
 		);
 	}
 	
-	gl.enable(gl.DEPTH_TEST);
 	drawTerrain(projection, view, cameraPosition, sunDirection, dayFactor);
 	requestAnimationFrame(frame);
 }
