@@ -53,7 +53,6 @@ void main() {
 	vec3 lightDir = normalize(uSunDirection);
 	float diffuse = max(dot(normal, lightDir), 0.0);
 	float heightBlend = smoothstep(-14.0, 34.0, vHeight);
-	float slopeDarken = 1.0 - saturate(normal.y) * 0.45;
 
 	float stoneMask = smoothstep(-25.0, 10.0, vHeight);
 	float grassMask = 1.0 - stoneMask;
@@ -783,21 +782,22 @@ function frame(now) {
 	];
 
 	const cycle = (Math.sin(cycleAngle) + 1) * 0.5;
-	const dayFactor = Math.pow(smoothstep(0.12, 0.88, cycle), 1.15);
+	const sunHeight = Math.sin(cycleAngle); // нормализованная высота [-1, 1]
+	const dayFactor = Math.pow(smoothstep(-0.15, 0.25, sunHeight), 1.15);
 	const cameraPosition = camera.position;
 	const forward = getCameraForward();
 	const target = addVectors(cameraPosition, forward);
 	const view = matrixLookAt(cameraPosition, target, [0, 1, 0]);
-	const projection = matrixPerspective(Math.PI / 3.4, width / height, 0.1, 400.0);
+	const projection = matrixPerspective(Math.PI / 3.4, width / height, 0.1, 1500.0);
 
 	const sunScreen = project(sunWorld, projection, view);
 	const moonScreen = project(moonWorld, projection, view);
 
 	const sunAzimuth = cycleAngle;
 	const sunDirection = normalizeVector([
-		Math.cos(sunAzimuth),
-		Math.sin(sunAzimuth) * 0.75 + 0.35,
-		Math.sin(sunAzimuth),
+		Math.cos(cycleAngle) * 300,
+		Math.sin(cycleAngle) * 220,
+		0
 	]);
 
 	const spriteWidth = 96 / width * 2;
