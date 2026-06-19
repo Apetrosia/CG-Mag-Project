@@ -770,6 +770,7 @@ function frame(now) {
 	const time = now * 0.001;
 	const cycleAngle = time * 0.18;
 	const skyboxSize = 500;
+
 	const sunWorld = [
 		Math.cos(cycleAngle) * 300,
 		Math.sin(cycleAngle) * 220,
@@ -780,6 +781,7 @@ function frame(now) {
 		Math.sin(cycleAngle + Math.PI) * 220,
 		skyboxSize + 2
 	];
+
 	const cycle = (Math.sin(cycleAngle) + 1) * 0.5;
 	const dayFactor = Math.pow(smoothstep(0.12, 0.88, cycle), 1.15);
 	const cameraPosition = camera.position;
@@ -788,19 +790,8 @@ function frame(now) {
 	const view = matrixLookAt(cameraPosition, target, [0, 1, 0]);
 	const projection = matrixPerspective(Math.PI / 3.4, width / height, 0.1, 400.0);
 
-	const sunScreen =
-		project(
-			sunWorld,
-			projection,
-			view
-		);
-
-	const moonScreen =
-		project(
-			moonWorld,
-			projection,
-			view
-		);
+	const sunScreen = project(sunWorld, projection, view);
+	const moonScreen = project(moonWorld, projection, view);
 
 	const sunAzimuth = cycleAngle;
 	const sunDirection = normalizeVector([
