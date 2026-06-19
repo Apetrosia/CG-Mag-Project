@@ -14,7 +14,6 @@ if (!gl) {
 const terrainVertexSource = `
 attribute vec3 aPosition;
 attribute vec3 aNormal;
-attribute vec2 aUv;
 
 uniform mat4 uProjection;
 uniform mat4 uView;
@@ -23,7 +22,6 @@ uniform mat4 uModel;
 varying vec3 vWorldPosition;
 varying vec3 vNormal;
 varying float vHeight;
-varying vec2 vUv;
 
 void main() {
 	vec4 worldPosition = uModel * vec4(aPosition, 1.0);
@@ -31,7 +29,6 @@ void main() {
 	vNormal = mat3(uModel) * aNormal;
 	vHeight = aPosition.y;
 	gl_Position = uProjection * uView * worldPosition;
-	vUv = aUv;
 }
 `;
 
@@ -42,13 +39,10 @@ uniform vec3 uSunDirection;
 uniform vec3 uCameraPosition;
 uniform float uDayFactor;
 uniform float uFogDensity;
-uniform sampler2D uGrass;
-uniform sampler2D uStone;
 
 varying vec3 vWorldPosition;
 varying vec3 vNormal;
 varying float vHeight;
-varying vec2 vUv;
 
 float saturate(float value) {
 	return clamp(value, 0.0, 1.0);
@@ -58,7 +52,6 @@ void main() {
 	vec3 normal = normalize(vNormal);
 	vec3 lightDir = normalize(uSunDirection);
 	float diffuse = max(dot(normal, lightDir), 0.0);
-	float backLight = max(dot(normal, normalize(vec3(-0.35, 0.7, 0.45))), 0.0);
 	float heightBlend = smoothstep(-14.0, 34.0, vHeight);
 	float slopeDarken = 1.0 - saturate(normal.y) * 0.45;
 
@@ -68,39 +61,23 @@ void main() {
 	vec3 grass = vec3(0.18, 0.42, 0.18);
 	vec3 stone = vec3(0.45, 0.45, 0.48);
 
-	// добавим лёгкую “грязь”, чтобы не было пластика
-	float noise = fract(sin(dot(vWorldPosition.xz, vec2(12.9898, 78.233))) * 43758.5453);
-	grass += (noise - 0.5) * 0.03;
-	stone += (noise - 0.5) * 0.02;
-
 	vec3 baseColor = mix(grass, stone, stoneMask);
 
 	float ambient = mix(0.35, 0.14, 1.0 - uDayFactor);
 	vec3 lightColor = mix(vec3(1.2, 1.05, 0.95), vec3(0.55, 0.7, 1.0), 1.0 - uDayFactor);
-	vec3 litColor = baseColor * (ambient + diffuse * 1.2 * uDayFactor + backLight * 0.3);
+	vec3 litColor = baseColor * (ambient + diffuse * 1.2 * uDayFactor);
 	litColor += lightColor * 0.05 * pow(diffuse, 2.0);
 
-	// высота камеры не используется — берём world Y
-	float fogHeight = vWorldPosition.y;
+	float heightFog = smoothstep(-5.0, -30.0, vWorldPosition.y);
 
-	// нормализуем (подбирается вручную под твою сцену)
-	float fogStart = -5.0;
-	float fogEnd = -30.0;
+	float fog = 1.0 - exp(-heightFog * 2.2);
 
-	// линейная маска высоты
-	float heightFog = smoothstep(fogStart, fogEnd, fogHeight);
-
-	// экспоненциальная плотность (реалистичнее)
-	float fog = 1.0 - exp(-heightFog * 3.2);
-
-	// цвет тумана = небо
 	vec3 fogColor = mix(
 		vec3(0.10, 0.13, 0.19),
 		vec3(0.76, 0.84, 0.93),
 		uDayFactor
 	);
 
-	// смешивание
 	litColor = mix(litColor, fogColor, fog);
 
 	gl_FragColor = vec4(litColor, 1.0);
@@ -125,9 +102,7 @@ void main()
 
 const skyboxFragmentSource = `
 precision mediump float;
-
 uniform float uDayFactor;
-
 varying vec3 vDirection;
 
 void main()
@@ -331,22 +306,10 @@ function mix(a, b, t)
 
 function terrainHeight(x, z)
 {
-    const continents =
-        fbm(x * 0.25, z * 0.25) * 40.0;
-
-    const mountains =
-        Math.pow(
-            fbm(x * 1.2, z * 1.2),
-            3.5
-        ) * 280.0;
-
-    const ridges =
-        Math.abs(
-            fbm(x * 2.5, z * 2.5) - 0.5
-        ) * 60.0;
-
-    const details =
-        fbm(x * 6.0, z * 6.0) * 12.0;
+    const continents = fbm(x * 0.25, z * 0.25) * 40.0;
+    const mountains = Math.pow(fbm(x * 1.2, z * 1.2), 3.5) * 280.0;
+    const ridges = Math.abs(fbm(x * 2.5, z * 2.5) - 0.5) * 60.0;
+    const details = fbm(x * 6.0, z * 6.0) * 12.0;
 
     return continents
         + mountains
@@ -360,7 +323,6 @@ function buildTerrain(gridSize, worldSize) {
 	const positions = new Float32Array(verticesPerSide * verticesPerSide * 3);
 	const normals = new Float32Array(verticesPerSide * verticesPerSide * 3);
 	const indices = new Uint16Array(gridSize * gridSize * 6);
-	const uvs = new Float32Array(verticesPerSide * verticesPerSide * 2);
 
 	let uvOffset = 0;
 	let positionOffset = 0;
@@ -377,8 +339,6 @@ function buildTerrain(gridSize, worldSize) {
 			positions[positionOffset++] = worldX;
 			positions[positionOffset++] = height;
 			positions[positionOffset++] = worldZ;
-			uvs[uvOffset++] = xRatio * 10.0;
-			uvs[uvOffset++] = zRatio * 10.0;
 		}
 	}
 
@@ -444,8 +404,6 @@ const terrainLocations = {
 	sunDirection: gl.getUniformLocation(terrainProgram, 'uSunDirection'),
 	cameraPosition: gl.getUniformLocation(terrainProgram, 'uCameraPosition'),
 	dayFactor: gl.getUniformLocation(terrainProgram, 'uDayFactor'),
-	grass: gl.getUniformLocation(terrainProgram, 'uGrass'),
-	stone: gl.getUniformLocation(terrainProgram, 'uStone'),
 };
 
 
@@ -489,7 +447,6 @@ const terrainBuffers = {
 	position: createBuffer(terrain.positions),
 	normal: createBuffer(terrain.normals),
 	index: createBuffer(terrain.indices, gl.ELEMENT_ARRAY_BUFFER),
-	uv: createBuffer(terrain.uvs),
 };
 
 const skyBuffer = createBuffer(new Float32Array([
@@ -685,7 +642,6 @@ function resizeCanvas() {
 function removeRotationFromMatrix(viewMatrix) {
     const m = viewMatrix.slice();
 
-    // обнуляем rotation (3x3 матрицу слева сверху)
     m[0] = 1; m[1] = 0; m[2] = 0;
     m[4] = 0; m[5] = 1; m[6] = 0;
     m[8] = 0; m[9] = 0; m[10] = 1;
@@ -812,7 +768,7 @@ function frame(now) {
 
 	const { width, height } = resizeCanvas();
 	const time = now * 0.001;
-	const cycleAngle = time * 0.18 - Math.PI * 0.5;
+	const cycleAngle = time * 0.18;
 	const skyboxSize = 500;
 	const sunWorld = [
 		Math.cos(cycleAngle) * 300,
@@ -859,11 +815,7 @@ function frame(now) {
 	gl.clearColor(0, 0, 0, 1);
 	gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-	drawSkybox(
-		projection,
-		view,
-		dayFactor
-	);
+	drawSkybox(projection, view, dayFactor);
 	if (sunScreen)
 	{
 		drawSprite(
